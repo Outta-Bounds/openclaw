@@ -126,6 +126,7 @@ The setup script accepts these optional environment variables:
 | ------------------------------------------ | --------------------------------------------------------------- |
 | `OPENCLAW_IMAGE`                           | Use a remote image instead of building locally                  |
 | `OPENCLAW_DOCKER_APT_PACKAGES`             | Install extra apt packages during build (space-separated)       |
+| `OPENCLAW_INSTALL_CLAUDE_CODE`             | Install Claude Code via Anthropic's signed apt stable channel   |
 | `OPENCLAW_EXTENSIONS`                      | Include selected bundled plugin helpers at build time           |
 | `OPENCLAW_EXTRA_MOUNTS`                    | Extra host bind mounts (comma-separated `source:target[:opts]`) |
 | `OPENCLAW_HOME_VOLUME`                     | Persist `/home/node` in a named Docker volume                   |
@@ -275,6 +276,55 @@ Installed downloadable plugins store their package state under the mounted
 OpenClaw home, so plugin install records and package roots survive container
 replacement. Gateway startup does not generate bundled-plugin dependency trees.
 
+Claude Code stores its own login state, user settings, and local project
+transcripts outside `~/.openclaw`, including `~/.claude` and `~/.claude.json`.
+If you use the Anthropic `claude-cli` backend in Docker and want Claude login
+plus session continuity to survive container replacement, persist the full home
+directory:
+
+```bash
+export OPENCLAW_HOME_VOLUME="openclaw_home"
+./scripts/docker/setup.sh
+```
+
+The setup script enables Claude Code installation by default for this Docker
+flow. Keep `OPENCLAW_HOME_VOLUME` set so Claude Code auth and transcript state
+survive container replacement.
+
+Then log Claude Code in from inside the same Compose setup and switch Anthropic
+models to the local Claude CLI backend:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.extra.yml run --rm openclaw-cli claude auth login
+docker compose -f docker-compose.yml -f docker-compose.extra.yml run --rm openclaw-cli claude auth status --text
+docker compose -f docker-compose.yml -f docker-compose.extra.yml run --rm openclaw-cli models auth login --provider anthropic --method cli --set-default
+docker compose -f docker-compose.yml -f docker-compose.extra.yml run --rm openclaw-cli models status --probe
+```
+
+Use canonical Anthropic model refs with a model-scoped CLI runtime override for
+manual config, for example:
+
+```json5
+{
+  agents: {
+    defaults: {
+      model: { primary: "anthropic/claude-opus-4-7" },
+      models: {
+        "anthropic/claude-opus-4-7": {
+          agentRuntime: { id: "claude-cli" },
+        },
+        "anthropic/claude-sonnet-4-6": {
+          agentRuntime: { id: "claude-cli" },
+        },
+      },
+    },
+  },
+}
+```
+
+The named volume must be kept when rebuilding or recreating containers. Deleting
+the volume deletes Claude Code's login and transcript state.
+
 For full persistence details on VM deployments, see
 [Docker VM Runtime - What persists where](/install/docker-vm-runtime#what-persists-where).
 
@@ -409,12 +459,13 @@ See [ClawDock](/install/clawdock) for the full helper guide.
 
     1. **Persist `/home/node`**: `export OPENCLAW_HOME_VOLUME="openclaw_home"`
     2. **Bake system deps**: `export OPENCLAW_DOCKER_APT_PACKAGES="git curl jq"`
-    3. **Install Playwright browsers**:
+    3. **Install Claude Code**: enabled by default in Docker setup
+    4. **Install Playwright browsers**:
        ```bash
        docker compose run --rm openclaw-cli \
          node /app/node_modules/playwright-core/cli.js install chromium
        ```
-    4. **Persist browser downloads**: use `OPENCLAW_HOME_VOLUME` or
+    5. **Persist browser downloads**: use `OPENCLAW_HOME_VOLUME` or
        `OPENCLAW_EXTRA_MOUNTS`. OpenClaw auto-detects the Docker image's
        Playwright-managed Chromium on Linux.
 

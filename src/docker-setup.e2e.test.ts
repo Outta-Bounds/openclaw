@@ -257,6 +257,7 @@ describe("scripts/docker/setup.sh", () => {
     expect(envFile).toContain("OPENCLAW_DOCKER_APT_PACKAGES=ffmpeg build-essential");
     expect(envFile).toContain("OPENCLAW_EXTRA_MOUNTS=");
     expect(envFile).toContain("OPENCLAW_HOME_VOLUME=openclaw-home"); // pragma: allowlist secret
+    expect(envFile).toContain("OPENCLAW_INSTALL_CLAUDE_CODE=1");
     expect(envFile).toContain("OPENCLAW_DISABLE_BONJOUR=");
     const extraCompose = await readFile(
       join(activeSandbox.rootDir, "docker-compose.extra.yml"),
@@ -267,6 +268,7 @@ describe("scripts/docker/setup.sh", () => {
     expect(extraCompose).toContain("openclaw-home:");
     const log = await readDockerLog(activeSandbox);
     expect(log).toContain("--build-arg OPENCLAW_DOCKER_APT_PACKAGES=ffmpeg build-essential");
+    expect(log).toContain("--build-arg OPENCLAW_INSTALL_CLAUDE_CODE=1");
     expect(log).toContain(
       "run --rm --no-deps --entrypoint node openclaw-gateway dist/index.js onboard --mode local --no-install-daemon",
     );
@@ -623,6 +625,16 @@ describe("scripts/docker/setup.sh", () => {
     const compose = await readFile(join(repoRoot, "docker-compose.yml"), "utf8");
     expect(compose).not.toContain("gateway-daemon");
     expect(compose).toContain('"gateway"');
+  });
+
+  it("keeps optional Claude Code Docker install on the signed apt stable channel", async () => {
+    const dockerfile = await readFile(join(repoRoot, "Dockerfile"), "utf8");
+    expect(dockerfile).toContain('ARG OPENCLAW_INSTALL_CLAUDE_CODE=""');
+    expect(dockerfile).toContain("ARG OPENCLAW_CLAUDE_CODE_GPG_FINGERPRINT");
+    expect(dockerfile).toContain("31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE");
+    expect(dockerfile).toContain("https://downloads.claude.ai/keys/claude-code.asc");
+    expect(dockerfile).toContain("https://downloads.claude.ai/claude-code/apt/stable stable main");
+    expect(dockerfile).toContain("apt-get install -y --no-install-recommends claude-code");
   });
 
   it("keeps docker-compose gateway Bonjour advertising in auto mode by default", async () => {

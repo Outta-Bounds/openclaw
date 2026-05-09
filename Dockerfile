@@ -257,6 +257,40 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
         docker-ce-cli docker-compose-plugin; \
     fi
 
+# Optionally install Claude Code for the bundled Anthropic claude-cli backend.
+# Build with: docker build --build-arg OPENCLAW_INSTALL_CLAUDE_CODE=1 ...
+# Keep this opt-in so the default runtime image does not gain another external
+# package repository or CLI surface.
+ARG OPENCLAW_INSTALL_CLAUDE_CODE=""
+ARG OPENCLAW_CLAUDE_CODE_GPG_FINGERPRINT="31DDDE24DDFAB679F42D7BD2BAA929FF1A7ECACE"
+RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,id=openclaw-bookworm-apt-lists,target=/var/lib/apt,sharing=locked \
+    if [ -n "$OPENCLAW_INSTALL_CLAUDE_CODE" ]; then \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        ca-certificates curl gnupg && \
+      install -m 0755 -d /etc/apt/keyrings && \
+      curl -fsSL https://downloads.claude.ai/keys/claude-code.asc -o /tmp/claude-code.asc && \
+      expected_fingerprint="$(printf '%s' "$OPENCLAW_CLAUDE_CODE_GPG_FINGERPRINT" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]')" && \
+      claude_gpg_pub_count="$(gpg --batch --show-keys --with-colons /tmp/claude-code.asc | awk -F: '$1 == "pub" { c++ } END { print c+0 }')" && \
+      if [ "$claude_gpg_pub_count" != "1" ]; then \
+        echo "ERROR: Claude Code apt key must contain exactly one public key (found $claude_gpg_pub_count); refusing a multi-key file." >&2; \
+        exit 1; \
+      fi && \
+      actual_fingerprint="$(gpg --batch --show-keys --with-colons /tmp/claude-code.asc | awk -F: '$1 == "fpr" { print toupper($10); exit }')" && \
+      if [ -z "$actual_fingerprint" ] || [ "$actual_fingerprint" != "$expected_fingerprint" ]; then \
+        echo "ERROR: Claude Code apt key fingerprint mismatch (expected $expected_fingerprint, got ${actual_fingerprint:-<empty>})" >&2; \
+        exit 1; \
+      fi && \
+      gpg --dearmor -o /etc/apt/keyrings/claude-code.gpg /tmp/claude-code.asc && \
+      rm -f /tmp/claude-code.asc && \
+      chmod a+r /etc/apt/keyrings/claude-code.gpg && \
+      printf 'deb [signed-by=/etc/apt/keyrings/claude-code.gpg] https://downloads.claude.ai/claude-code/apt/stable stable main\n' \
+        > /etc/apt/sources.list.d/claude-code.list && \
+      apt-get update && \
+      DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends claude-code; \
+    fi
+
 # Expose the CLI binary without requiring npm global writes as non-root.
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw \
  && chmod 755 /app/openclaw.mjs
